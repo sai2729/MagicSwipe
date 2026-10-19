@@ -1,0 +1,17 @@
+#!/bin/bash
+# Turns MagicSwipe on or off (no argument: toggle). Prints the new state.
+# Meant to be run from a Shortcuts "Run Shell Script" action added to Control Center.
+#   magicswipe-toggle [on|off]
+
+if pgrep -qx MagicSwipe; then current=on; else current=off; fi
+target="${1:-$([[ $current == on ]] && echo off || echo on)}"
+
+if [[ $target == on ]]; then
+  defaults write com.magicswipe.app Enabled -bool YES
+  [[ $current == on ]] || launchctl kickstart "gui/$(id -u)/com.magicswipe.agent"
+  echo "MagicSwipe is on"
+else
+  defaults write com.magicswipe.app Enabled -bool NO
+  pkill -TERM -x MagicSwipe
+  echo "MagicSwipe is off"
+fi
