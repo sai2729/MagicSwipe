@@ -1,100 +1,186 @@
 # MagicSwipe
 
-Two-finger Magic Mouse swipe on an iPad controlled through Universal Control:
-| Gesture | iPad shortcut | Does |
+**Use Magic Mouse gestures on your iPad through Universal Control.**
+
+With Universal Control you can move your Mac's Magic Mouse onto an iPad, but the
+mouse's swipe gestures don't come along. A two-finger swipe that switches apps on
+the Mac does nothing on the iPad, so you end up reaching for the trackpad or the iPad
+screen. MagicSwipe fixes that:
+
+| On the iPad, with the Magic Mouse | Does | Sends |
 |---|---|---|
-| swipe left / right | Globe+Left / Globe+Right | switch apps |
-| swipe up, or double-tap | Globe+Up | App Switcher |
-| swipe down | Globe+H | Home Screen |
+| two-finger swipe left / right | switch to the previous / next app | Globe + ← / → |
+| two-finger swipe up, or two-finger double-tap | open the App Switcher | Globe + ↑ |
+| two-finger swipe down | go to the Home Screen | Globe + H |
 
-The double-tap does not scroll the page underneath.
+While the pointer is on the Mac, MagicSwipe stays out of the way and your Mac gestures
+work as usual. You can switch it on and off from Control Center, and when it's off
+none of its processes run.
 
-Universal Control forwards only pointer, scroll and keyboard input from a mouse, so the
-iPad never sees the Magic Mouse's swipe gesture. MagicSwipe reads the touches on the
-Mac and presses **Globe + Left/Right arrow** on a virtual keyboard instead. The keys
-come from a virtual *hardware* device (Karabiner's DriverKit driver), which Universal
-Control forwards like a real keyboard. Synthetic `CGEvent` keys never reach the iPad.
+> Tested on macOS 27 with a Magic Mouse (Bluetooth product ID 0x0269) and an iPad using
+> Universal Control. It relies on undocumented Apple internals (see
+> [How it works](#how-it-works)), so a future macOS update may break it.
 
-## Pieces
+## Requirements
 
-| Piece | Runs as | When |
-|---|---|---|
-| `/Applications/MagicSwipe.app` | you | only while MagicSwipe is on (hand icon in the menu bar) |
-| `magicswipe-keyd` | root | only while MagicSwipe is on (launchd socket activation) |
-| Karabiner VirtualHIDDevice daemon | root | started/stopped by `magicswipe-keyd` |
-| Karabiner VirtualHIDDevice driver | driver | always loaded once activated (idle when unused) |
+- A Mac and an iPad set up for [Universal Control](https://support.apple.com/102459)
+- A Magic Mouse connected to the Mac
+- Xcode or the Command Line Tools (`xcode-select --install`), with a compiler that supports C++23 (Xcode 16 or later)
+- An administrator account (installation uses `sudo`)
+- macOS 26 or later for the Control Center button (on older versions, use the Terminal command or a keyboard shortcut instead)
 
-`magicswipe-toggle` turns it on (starts the app) or off (quits it). Quitting
-disconnects from `magicswipe-keyd`, which exits and stops the Karabiner daemon, so
-nothing of MagicSwipe's runs while it is off. The state is remembered across logins.
+## Install
 
-## Control Center toggle
+### 1. Get the code
 
-1. Shortcuts → Settings → Advanced → turn on **Allow Running Scripts**.
-2. New shortcut named **MagicSwipe** with a **Run Shell Script** action:
-   `/usr/local/bin/magicswipe-toggle`
-   Optionally add **Show Notification** with the *Shell Script Result*.
-3. Control Center → **Edit Controls** → Shortcuts → add **MagicSwipe**.
+```bash
+git clone --recursive https://github.com/sai2729/MagicSwipe.git
+cd MagicSwipe
+```
 
-From Terminal: `magicswipe-toggle`, `magicswipe-toggle on`, `magicswipe-toggle off`.
+`--recursive` also downloads [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice),
+the open-source virtual keyboard driver MagicSwipe sends keys through. If you already
+cloned without it, run `git submodule update --init`.
 
-Where the pointer is comes from Universal Control itself: it publishes the notify(3)
-state `user.uid.<uid>.com.apple.universalcontrol.inputstate` (bit 0x2 = pointer on
-another device, 0x1 = keyboard on another device). While the pointer is on the Mac,
-MagicSwipe does not read the Magic Mouse touches at all; it starts reading them when
-the pointer moves onto the iPad.
+### 2. Install the virtual keyboard driver
 
-Universal Control sends keys to the device that was last clicked, so when the keyboard
-is not yet on the iPad `magicswipe-keyd` first presses mouse button 4 on a virtual
-mouse (ignored by iPadOS) to move keyboard focus there.
+MagicSwipe needs only this driver, not the Karabiner-Elements app. The package below
+is signed and notarized by its author and comes with the submodule.
 
-Universal Control forwards the Magic Mouse's scrolling straight from the hardware, so
-swipes also scroll the page under the pointer a little; that cannot be blocked without
-proxying all mouse input.
+```bash
+sudo installer -pkg vendor/vhid/dist/Karabiner-DriverKit-VirtualHIDDevice-8.5.0.pkg -target /
+/Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate
+```
 
-## Build and install
+Then approve the driver: **System Settings → General → Login Items & Extensions →
+Driver Extensions** (click ⓘ next to *.Karabiner-VirtualHIDDevice-Manager*) → turn it on.
 
-`vendor/vhid` is a git submodule pinned to Karabiner-DriverKit-VirtualHIDDevice v8.5.0
-(client protocol 7); clone with `git clone --recursive` or run `git submodule update --init`.
+Check that it's active. The line should end in `[activated enabled]`:
+
+```bash
+systemextensionsctl list | grep pqrs
+```
+
+> **Already using Karabiner-Elements?** It installs the same driver, so you can skip
+> this step. MagicSwipe is built against driver package 8.5.0 (client protocol 7). If
+> your Karabiner-Elements ships a different driver version and keys never arrive, see
+> [Troubleshooting](#troubleshooting).
+
+### 3. Build and install MagicSwipe
 
 ```bash
 ./build.sh
 sudo ./install.sh
 ```
 
-No Input Monitoring permission is needed: the app reads Magic Mouse touches through
-MultitouchSupport and the pointer location from Universal Control's published state.
+This installs:
 
-Uninstall: `sudo ./uninstall.sh`
+- `/Applications/MagicSwipe.app`, the app that recognises the gestures (a hand icon in the menu bar while it's on)
+- `magicswipe-keyd`, a small helper that runs as root and presses the keys on the virtual keyboard
+- `/usr/local/bin/magicswipe-toggle`, which turns MagicSwipe on and off
 
-## Driver only, without Karabiner-Elements
+MagicSwipe turns on straight away. Move the pointer onto your iPad and try a two-finger
+swipe on the Magic Mouse.
 
-MagicSwipe needs only Karabiner's driver, not the Karabiner-Elements app.
+No Input Monitoring or Accessibility permission is needed.
 
-1. Karabiner-Elements Settings → **Uninstall** (this also deactivates the driver), then restart.
-2. Install the standalone driver package (signed and notarized; it ships in the cloned repo):
-   ```bash
-   sudo installer -pkg vendor/vhid/dist/Karabiner-DriverKit-VirtualHIDDevice-8.5.0.pkg -target /
-   ```
-3. Activate the driver, then approve it in System Settings → General → Login Items & Extensions → Driver Extensions:
-   ```bash
-   /Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate
-   ```
+### 4. Add an on/off button to Control Center (optional)
 
-To remove the driver later:
+1. Open **Shortcuts** → Settings → **Advanced** → turn on **Allow Running Scripts**.
+2. Create a shortcut named **MagicSwipe** with a **Run Shell Script** action containing
+   `/usr/local/bin/magicswipe-toggle`.
+   To see "MagicSwipe is on/off" when you tap it, add a **Show Notification** action
+   with *Shell Script Result*.
+3. Open **Control Center → Edit Controls → Shortcuts** and add **MagicSwipe**.
+
+You can also use Terminal: `magicswipe-toggle`, `magicswipe-toggle on`,
+`magicswipe-toggle off`. MagicSwipe remembers whether it was on or off after a restart.
+
+## Using it
+
+- Gestures work only while the pointer is on the iPad. You don't need to click on the iPad first.
+- Swipes move the page under the pointer a little, because Universal Control also forwards the mouse's scrolling. The two-finger **double-tap** opens the App Switcher without any scrolling.
+- If left and right feel backwards, use the menu bar icon → **Reverse Swipe Direction**.
+- To turn it off, use the Control Center button, `magicswipe-toggle off`, or the menu → **Turn Off MagicSwipe**.
+
+### What runs on your Mac
+
+| Process | When it runs | Memory |
+|---|---|---|
+| MagicSwipe.app | only while it's on | ~18 MB |
+| magicswipe-keyd (root) | only while it's on (started on demand by launchd) | ~6 MB |
+| Karabiner VirtualHIDDevice daemon (root) | only while it's on (started and stopped by magicswipe-keyd) | ~10 MB |
+| Karabiner VirtualHIDDevice driver | always (an idle system driver) | ~3 MB |
+
+While the pointer is on the Mac, MagicSwipe doesn't read the mouse's touches at all, so it uses no CPU.
+
+## Uninstall
+
+```bash
+sudo ./uninstall.sh
+```
+
+To remove the driver as well:
 
 ```bash
 bash '/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall/deactivate_driver.sh'
 sudo bash '/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall/remove_files.sh'
 ```
 
-## Tuning (`app/main.m`)
+Remove the **MagicSwipe** shortcut from Shortcuts and Control Center yourself.
 
-- `kSideTravel` (0.10) / `kUpTravel` (0.06): fraction of the touch surface the fingers must travel
+## Troubleshooting
+
+Check the logs first:
+
+```bash
+tail -20 /var/log/magicswipe-keyd.log /tmp/magicswipe-agent.log
+```
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Menu says *Key sender not reachable* | Run `sudo ./install.sh` again. |
+| Log says *could not start … Karabiner-VirtualHIDDevice-Daemon* | The driver isn't installed: repeat step 2. |
+| Log never says *virtual keyboard ready: yes* | The driver isn't approved, or its version doesn't match. Check `systemextensionsctl list \| grep pqrs`; if you're using Karabiner-Elements' driver, install the 8.5.0 package from step 2 instead. |
+| Log shows *sent Globe+…*, but the iPad does nothing | Check that the Globe shortcuts work on your iPad: with the pointer on the iPad, press 🌐 + ← on a real keyboard. |
+| Gestures aren't recognised | Run the probe (below) to see what MagicSwipe detects. As a last resort, allow MagicSwipe under Privacy & Security → Input Monitoring. |
+| Stopped working after a macOS update | One of the undocumented interfaces probably changed. The probe shows which one. |
+
+**Probe mode** logs every gesture and Universal Control state change, and sends nothing:
+
+```bash
+magicswipe-toggle off
+/Applications/MagicSwipe.app/Contents/MacOS/MagicSwipe --probe
+```
+
+**Test the key path without gestures.** With the pointer on the iPad, this should switch apps after 5 seconds:
+
+```bash
+sudo "/Library/Application Support/MagicSwipe/magicswipe-keyd" --test L --focus-button 4
+```
+
+## How it works
+
+Here's why something this simple needs a driver:
+
+1. **Universal Control ignores fake key presses.** Keys made with `CGEventPost` or AppleScript only reach the Mac. Universal Control picks up input lower down, at the hardware (HID) level, so the keys have to come from a device that looks like real hardware. Karabiner's DriverKit driver provides a virtual keyboard and mouse that macOS treats exactly like physical ones. Only root processes may use it, which is why `magicswipe-keyd` runs as root.
+2. **Universal Control sorts devices by type.** It sends a trackpad's raw finger data to the iPad, which is why trackpad gestures work there. For anything it classifies as a *mouse*, including the Magic Mouse, it only sends pointer movement, buttons and scrolling. A live, draggable app switch would need a virtual *trackpad*, and Apple only grants drivers permission for that case by case. So MagicSwipe uses the iPad's keyboard shortcuts instead.
+3. **Reading the gestures.** The app reads Magic Mouse touches from Apple's private `MultitouchSupport.framework` and recognises two-finger swipes and taps itself.
+4. **Knowing where the pointer is.** Universal Control publishes a notify(3) state, `user.uid.<uid>.com.apple.universalcontrol.inputstate`. Bit `0x2` means the pointer is on another device, and `0x1` means the keyboard is. MagicSwipe reads touches only while bit `0x2` is set.
+5. **Keyboard focus.** Universal Control sends typing to the device you last clicked. If the keyboard isn't on the iPad yet, `magicswipe-keyd` first presses mouse button 4 on the virtual mouse. iPadOS ignores that button, but it moves the keyboard to the iPad, so you never have to click there.
+6. **Running only when on.** `magicswipe-keyd` is a launchd socket-activated daemon. It starts when the app connects and exits when the app disconnects, and it stops the Karabiner daemon as it goes. It accepts only one-byte commands from the logged-in user (checked with `getpeereid`), and only ever presses the four shortcuts above.
+
+### Tuning
+
+These are in `app/main.m`. Rebuild and reinstall after changing them.
+
+- `kSideTravel` (0.10) / `kUpTravel` (0.06): how far the fingers must travel, as a fraction of the touch surface
 - `kSideRatio` / `kUpRatio`: how straight the swipe must be
-- `kTapMaxDuration`, `kTapMaxMove`, `kDoubleTapWindow`: two-finger double-tap timing
-- Menu → **Reverse Swipe Direction** flips which way goes to the previous app
+- `kTapMaxDuration`, `kTapMaxMove`, `kDoubleTapWindow`: double-tap timing
 
-## Logs
+## Credits and license
 
-`/tmp/magicswipe-agent.log` (app) and `/var/log/magicswipe-keyd.log` (key sender).
+MagicSwipe is MIT licensed (see [LICENSE](LICENSE)). The virtual HID driver and client
+library are [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
+by Takayama Fumihiko, which is public domain. MagicSwipe isn't affiliated with Apple or
+the Karabiner project.

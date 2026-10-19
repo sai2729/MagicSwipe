@@ -11,6 +11,6 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSHumanReadableCopyright</key><string>Personal tool</string>
+  <key>NSHumanReadableCopyright</key><string>MIT License</string>
 </dict>
 </plist>
